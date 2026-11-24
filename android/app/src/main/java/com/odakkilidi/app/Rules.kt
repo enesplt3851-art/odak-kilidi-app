@@ -27,6 +27,11 @@ data class Rule(
 
 data class Config(val rules: List<Rule>)
 
+/** Ders oturumu: başlangıç/bitiş (ms) ve o an seçilen hedefler. Erken bitirilemez. */
+data class Session(val start: Long, val end: Long, val apps: Set<String>, val sites: Set<String>) {
+    fun targets(): Set<String> = apps.map { "a:$it" }.toSet() + sites.map { "s:$it" }.toSet()
+}
+
 /** Tek tıkla seçilen favori platformlar: uygulama + site birlikte. */
 data class Preset(val name: String, val apps: Set<String>, val sites: Set<String>)
 
@@ -48,8 +53,10 @@ object Presets {
     val allApps: Set<String> = ALL.flatMap { it.apps }.toSet()
     val allSites: Set<String> = ALL.flatMap { it.sites }.toSet()
 
-    fun selectedIn(r: Rule): List<Preset> =
-        ALL.filter { p -> r.sites.any { it in p.sites } || r.apps.any { it in p.apps } }
+    fun selectedIn(r: Rule): List<Preset> = selectedFor(r.apps, r.sites)
+
+    fun selectedFor(apps: Set<String>, sites: Set<String>): List<Preset> =
+        ALL.filter { p -> sites.any { it in p.sites } || apps.any { it in p.apps } }
 
     fun nameForApp(pkg: String): String? = ALL.firstOrNull { pkg in it.apps }?.name
     fun nameForSite(site: String): String? = ALL.firstOrNull { site in it.sites }?.name
@@ -97,11 +104,8 @@ object Rules {
         return b
     }
 
-    fun dersTargets(c: Config): Set<String> =
-        c.rules.filter { it.kind == KIND_DERS }.flatMap { it.targets() }.toSet()
-
     /** Şu an hangi uygulama/siteler engelli? */
-    fun blockState(c: Config, wm: Int, sessionActive: Boolean): BlockState {
+    fun blockState(c: Config, wm: Int, sessions: List<Session>): BlockState {
         val apps = HashMap<String, String>()
         val sites = HashMap<String, String>()
         for (r in c.rules) {
@@ -110,11 +114,9 @@ object Rules {
                 r.sites.forEach { sites.putIfAbsent(it, r.name) }
             }
         }
-        if (sessionActive) {
-            for (r in c.rules.filter { it.kind == KIND_DERS }) {
-                r.apps.forEach { apps.putIfAbsent(it, "Ders modu") }
-                r.sites.forEach { sites.putIfAbsent(it, "Ders modu") }
-            }
+        for (ss in sessions) {
+            ss.apps.forEach { apps.putIfAbsent(it, "Ders modu") }
+            ss.sites.forEach { sites.putIfAbsent(it, "Ders modu") }
         }
         return BlockState(apps, sites)
     }
@@ -149,9 +151,7 @@ object Rules {
 
     /** Yeni ayar eskisinden daha sıkı (ya da aynı) mı? Öyleyse hemen uygulanabilir. */
     fun isStricterOrEqual(new: Config, old: Config): Boolean {
-        // 1) Ders modunun kapsamı küçülmemeli
-        if (!dersTargets(new).containsAll(dersTargets(old))) return false
-        // 2) Her hedef için eski yasak dakikaları yenide de yasak olmalı
+        // Her hedef için eski yasak dakikaları yenide de yasak olmalı
         val oldMasks = old.rules.map { it to mask(it) }
         val newMasks = new.rules.map { it to mask(it) }
         val targets = old.rules.flatMap { it.targets() }.toSet()
@@ -186,6 +186,41 @@ object Rules {
         val day = (wm / 1440) % 7
         val t = fmt(wm % 1440)
         return if (day == (nowWm / 1440) % 7) t else "${DAY_NAMES[day]} $t"
+    }
+
+    /** ms -> "15:00", "Yarın 15:00" ya da "Sal 15:00" */
+    fun fmtMillis(ms: Long): String {
+        val z = java.time.ZoneId.systemDefault()
+        val t = java.time.Instant.ofEpochMilli(ms).atZone(z)
+        val today = java.time.LocalDate.now(z)
+        val hm = fmt(t.hour * 60 + t.minute)
+        return when (t.toLocalDate()) {
+            today -> hm
+            today.plusDays(1) -> "Yarın $hm"
+            else -> "${DAY_NAMES[t.dayOfWeek.value - 1]} $hm"
+        }
+    }
+
+    fun sessionsToJson(list: List<Session>): String {
+        val arr = JSONArray()
+        for (x in list) {
+            arr.put(JSONObject().put("start", x.start).put("end", x.end)
+                .put("apps", JSONArray(x.apps.toList())).put("sites", JSONArray(x.sites.toList())))
+        }
+        return arr.toString()
+    }
+
+    fun sessionsFromJson(s: String?): List<Session> {
+        if (s == null) return emptyList()
+        return try {
+            val arr = JSONArray(s)
+            (0 until arr.length()).map { i ->
+                val o = arr.getJSONObject(i)
+                Session(o.getLong("start"), o.getLong("end"), strSet(o.optJSONArray("apps")), strSet(o.optJSONArray("sites")))
+            }
+        } catch (e: Exception) {
+            emptyList()
+        }
     }
 
     fun fmtRange(g: Range): String =

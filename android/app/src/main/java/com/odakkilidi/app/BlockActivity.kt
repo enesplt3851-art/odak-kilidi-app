@@ -46,42 +46,56 @@ class BlockActivity : Activity() {
             val wm = Rules.weekMinuteNow()
             val cfg = Store.active(this)
             val byRules = Rules.minutesUntilFree(cfg, target, wm) ?: (7 * 1440)
-            val bySession = if (Store.sessionActive(this) && target in Rules.dersTargets(cfg))
-                ((Store.sessionEnd(this) - System.currentTimeMillis() + 59_999) / 60_000).toInt() else 0
+            val now = System.currentTimeMillis()
+            val sEnd = Store.activeSessions(this).filter { target in it.targets() }.maxOfOrNull { it.end } ?: now
+            val bySession = ((sEnd - now + 59_999) / 60_000).toInt()
             val d = maxOf(byRules, bySession)
             left = if (d >= 7 * 1440) "Sürekli kilitli." else
                 "Açılmasına ${Rules.fmtDuration(d)} var (${Rules.fmtWeekMinute((wm + d) % WEEK, wm)})."
         }
 
+        window.statusBarColor = Ui.BG
+        window.navigationBarColor = Ui.BG
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
-            setBackgroundColor(Color.parseColor("#1F2A44"))
+            background = android.graphics.drawable.GradientDrawable(
+                android.graphics.drawable.GradientDrawable.Orientation.TOP_BOTTOM,
+                intArrayOf(Color.parseColor("#2A1F5C"), Ui.BG)
+            )
             setPadding(dp(32), dp(32), dp(32), dp(32))
         }
         box.addView(TextView(this).apply {
             text = "🔒"
-            textSize = 64f
+            textSize = 72f
             gravity = Gravity.CENTER
         })
         box.addView(TextView(this).apply {
             text = message
-            textSize = 20f
-            setTextColor(Color.WHITE)
-            setTypeface(typeface, Typeface.BOLD)
+            textSize = 22f
+            setTextColor(Ui.TEXT)
+            setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD))
             gravity = Gravity.CENTER
-            setPadding(0, dp(16), 0, dp(8))
+            setLineSpacing(0f, 1.2f)
+            setPadding(0, dp(18), 0, dp(10))
+        })
+        if (left.isNotEmpty()) box.addView(TextView(this).apply {
+            text = left
+            textSize = 15f
+            setTextColor(Color.WHITE)
+            gravity = Gravity.CENTER
+            background = Ui.rounded(this@BlockActivity, Ui.SURFACE2, 20, Ui.ACCENT)
+            setPadding(dp(18), dp(10), dp(18), dp(10))
         })
         box.addView(TextView(this).apply {
-            text = left
-            textSize = 16f
-            setTextColor(Color.parseColor("#FFC857"))
+            text = "Odaklan. Gerisi bekleyebilir. 💪"
+            textSize = 14f
+            setTextColor(Ui.MUTED)
             gravity = Gravity.CENTER
-            setPadding(0, 0, 0, dp(24))
+            setPadding(0, dp(28), 0, dp(20))
         })
-        box.addView(Button(this).apply {
-            text = "Ana ekrana dön"
-            setOnClickListener { goHome() }
+        box.addView(Ui.button(this, "Ana ekrana dön", primary = true) { goHome() }.apply {
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
         })
         setContentView(box)
     }

@@ -10,7 +10,7 @@ import java.time.LocalDate
  * Ayarların saklandığı yer.
  *  - "active": şu an geçerli kurallar
  *  - "pending" + "pendingDate": gevşeten bir değişiklik; o tarihte (ertesi gün) geçerli olur
- *  - "sessionEnd": ders modunun bitiş zamanı (ms)
+ *  - "sessions": ders oturumları (başlangıç, bitiş, hedefler)
  *  - "unlockDate": kaldırma izni günü; sadece o gün koruma kapalıdır
  */
 object Store {
@@ -69,19 +69,37 @@ object Store {
     }
 
     // ---- Ders modu ----
-    fun sessionEnd(ctx: Context): Long = p(ctx).getLong("sessionEnd", 0L)
-
-    fun sessionActive(ctx: Context): Boolean = sessionEnd(ctx) > System.currentTimeMillis()
-
-    /** Ders modunu başlat ya da uzat. Erken bitirilemez. */
-    fun startSession(ctx: Context, minutes: Int) {
+    /** Bitmemiş (şu an süren ya da ileride başlayacak) oturumlar, başlangıca göre sıralı. */
+    fun sessions(ctx: Context): List<Session> {
         val now = System.currentTimeMillis()
-        val end = maxOf(sessionEnd(ctx), now) + minutes * 60_000L
-        p(ctx).edit().putLong("sessionEnd", end).apply()
+        val all = Rules.sessionsFromJson(p(ctx).getString("sessions", null))
+        val alive = all.filter { it.end > now }.sortedBy { it.start }
+        if (alive.size != all.size) p(ctx).edit().putString("sessions", Rules.sessionsToJson(alive)).apply()
+        return alive
+    }
+
+    fun activeSessions(ctx: Context): List<Session> {
+        val now = System.currentTimeMillis()
+        return sessions(ctx).filter { it.start <= now }
+    }
+
+    /** Yeni ders oturumu ekle. Erken bitirilemez, iptal edilemez. */
+    fun addSession(ctx: Context, s: Session) {
+        val list = sessions(ctx) + s
+        p(ctx).edit()
+            .putString("sessions", Rules.sessionsToJson(list))
+            .putString("lastSession", Rules.sessionsToJson(listOf(s)))
+            .apply()
+    }
+
+    /** Son ders oturumunda seçilen hedefler (ekranı doldurmak için). */
+    fun lastSessionTargets(ctx: Context): Pair<Set<String>, Set<String>>? {
+        val s = Rules.sessionsFromJson(p(ctx).getString("lastSession", null)).firstOrNull() ?: return null
+        return s.apps to s.sites
     }
 
     fun blockState(ctx: Context): BlockState =
-        Rules.blockState(active(ctx), Rules.weekMinuteNow(), sessionActive(ctx))
+        Rules.blockState(active(ctx), Rules.weekMinuteNow(), activeSessions(ctx))
 
     // ---- Kaldırma izni ----
     fun unlockDate(ctx: Context): String? {

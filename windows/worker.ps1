@@ -46,12 +46,19 @@ function Invoke-Inbox($state) {
             }
             'startSession' {
                 $min = [int]$req.minutes
-                if ($min -gt 0 -and $min -le 720) {
-                    $now = Get-Date
-                    $cur = Get-SessionEnd $state
-                    $from = if ($null -ne $cur -and $cur -gt $now) { $cur } else { $now }
-                    $state.sessionEnd = $from.AddMinutes($min).ToString('o', $OK_Inv)
+                $now = Get-Date
+                $start = if ($req.start) { ConvertFrom-IsoTime ([string]$req.start) } else { $now }
+                if ($null -eq $start -or $start -lt $now.AddMinutes(-2)) { $start = $now }
+                $sess = ConvertTo-Session ([pscustomobject]@{ start = ''; end = ''; apps = $req.apps; sites = $req.sites })
+                if ($min -ge 5 -and $min -le 720 -and $start -le $now.AddDays(1) -and ($sess.apps.Count + $sess.sites.Count) -gt 0) {
+                    $sess.start = $start.ToString('o', $OK_Inv)
+                    $sess.end = $start.AddMinutes($min).ToString('o', $OK_Inv)
+                    $alive = Get-AliveSessions $state
+                    $state.sessions = @($alive) + @($sess)
+                    $state.lastSession = $sess
                     $result = 'OK'
+                } else {
+                    $result = 'GECERSIZ'
                 }
             }
             'cancelPending' { $state.pending = $null; $state.pendingDate = $null; $result = 'OK' }
@@ -77,6 +84,11 @@ function Update-Dates($state) {
         Write-Log 'bekleyen degisiklik gecerli oldu'
         $changed = $true
     }
+    $alive = Get-AliveSessions $state
+    if ($alive.Count -ne @($state.sessions | Where-Object { $null -ne $_ }).Count) {
+        $state.sessions = $alive
+        $changed = $true
+    }
     if ($state.unlockDate -and ($state.unlockDate -lt $today)) {
         $state.unlockDate = $null
         $changed = $true
@@ -97,7 +109,7 @@ while ($true) {
             if (Update-Dates $state) { $dirty = $true }
             if ($dirty) { Save-OKState $state }
 
-            $bs = Get-BlockState $state.active (Get-WeekMinute) (Test-SessionActive $state)
+            $bs = Get-BlockState $state.active (Get-WeekMinute) (Get-ActiveSessions $state)
             $blocked = ($bs.procs.Count + $bs.sites.Count) -gt 0
 
             if ($blocked) {

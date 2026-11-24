@@ -6,7 +6,8 @@ Telefonda (Android) ve bilgisayarda (Windows) ayrı ayrı, aynı anda çalışı
 ## Nasıl çalışır?
 - **Kurallar:** Her kuralın kendi adı, günleri, saatleri ve hedefleri var. Örn. *Instagram → hafta içi 09:00–17:00*, *YouTube → her gün 23:00–07:00*.
 - **📅 Rutin kural:** Seçtiğin gün ve saatlerde her hafta otomatik kilitlenir.
-- **📚 Ders kuralı:** Ana ekrandaki **Ders başlat** ile seçtiğin süre (25 dk – 4 saat) boyunca kilitlenir, erken bitirilemez. İstersen saat de eklersin, o saatlerde otomatik kilitlenir.
+- **📚 Ders modu:** "Ders çalışmaya başla"ya bas → süreyi seç (örn. 4 saat), istersen başlangıç saatini seç (örn. 15:00), o an neyin kilitleneceğini işaretle. Süre bitmeden açılmaz, iptal edilemez. Son seçimin bir dahaki sefere hazır gelir.
+- **📚 Ders kuralı:** Haftalık sabit ders saatlerin için (örn. hafta içi 14:00–17:00).
 - **⭐ Favoriler:** Instagram, YouTube, TikTok, X, Facebook, Reddit, Twitch, Netflix, Snapchat, Discord, Pinterest, WhatsApp — tek tıkla uygulama + site birlikte. Listede olmayanları "Diğer uygulamalar / siteler"den eklersin.
 - Saatler elle yazılmaz, **saat seçiciden** seçilir. Başlangıç = bitiş → tüm gün. 23:00 → 07:00 gece yarısını aşar.
 - Kısıtlamayı **artıran** değişiklik **hemen**, **azaltan** değişiklik (saat kısaltma, hedef çıkarma, kural silme) **ertesi gün** geçerli olur.

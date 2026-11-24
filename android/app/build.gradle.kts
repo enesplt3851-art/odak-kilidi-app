@@ -12,26 +12,25 @@ android {
         minSdk = 26
         targetSdk = 34
         // Her GitHub derlemesinde sürüm numarası otomatik artar (güncelleme üstüne kurulabilsin diye)
-        versionCode = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInt()
+        versionCode = 1000 + (System.getenv("GITHUB_RUN_NUMBER") ?: "0").toInt()  // eski depodaki sürümlerden büyük olsun
         versionName = "1.0." + (System.getenv("GITHUB_RUN_NUMBER") ?: "0")
     }
 
-    // Sabit imza anahtarı: yeni sürümler eskisinin ÜSTÜNE kurulur, silmek gerekmez.
+    // İmza anahtarı GitHub Secrets'tan gelir (depoda anahtar yok).
+    // Hep aynı anahtar: yeni sürümler eskisinin ÜSTÜNE kurulur.
     signingConfigs {
         create("release") {
-            storeFile = file("odak.jks")
-            storePassword = "odakkilidi"
+            storeFile = file(System.getenv("KEYSTORE_FILE") ?: "odak.p12")
+            storePassword = System.getenv("KEYSTORE_PASSWORD") ?: ""
             keyAlias = "odak"
-            keyPassword = "odakkilidi"
+            keyPassword = System.getenv("KEYSTORE_PASSWORD") ?: ""
+            storeType = "PKCS12"
         }
     }
 
     buildTypes {
         getByName("release") {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("release")
-        }
-        getByName("debug") {
             signingConfig = signingConfigs.getByName("release")
         }
     }

@@ -146,7 +146,8 @@ function Normalize-State($raw) {
         pending       = $null
         pendingDate   = $null
         unlockDate    = $null
-        sessionEnd    = $null
+        sessions      = @()
+        lastSession   = $null
         lastRequestId = $null
         lastResult    = $null
     }
@@ -156,7 +157,8 @@ function Normalize-State($raw) {
         if ($null -ne $raw.pending) { $s.pending = ConvertTo-Config $raw.pending }
         if ($raw.pendingDate)   { $s.pendingDate   = [string]$raw.pendingDate }
         if ($raw.unlockDate)    { $s.unlockDate    = [string]$raw.unlockDate }
-        if ($raw.sessionEnd)    { $s.sessionEnd    = [string]$raw.sessionEnd }
+        if ($null -ne $raw.sessions) { $s.sessions = @(@($raw.sessions) | Where-Object { $null -ne $_ } | ForEach-Object { ConvertTo-Session $_ }) }
+        if ($null -ne $raw.lastSession) { $s.lastSession = ConvertTo-Session $raw.lastSession }
         if ($raw.lastRequestId) { $s.lastRequestId = [string]$raw.lastRequestId }
         if ($raw.lastResult)    { $s.lastResult    = [string]$raw.lastResult }
     }
@@ -182,14 +184,27 @@ function Save-OKState($s) {
 
 # ---------- Ders modu ----------
 
-function Get-SessionEnd($state) {
-    if (-not $state.sessionEnd) { return $null }
-    try { return [datetime]::Parse($state.sessionEnd, $OK_Inv, [Globalization.DateTimeStyles]::RoundtripKind).ToLocalTime() } catch { return $null }
+function ConvertTo-Session($o) {
+    [pscustomobject]@{ start = [string]$o.start; end = [string]$o.end; apps = (L $o.apps); sites = (L $o.sites) }
 }
 
-function Test-SessionActive($state) {
-    $e = Get-SessionEnd $state
-    return ($null -ne $e -and $e -gt (Get-Date))
+function ConvertFrom-IsoTime([string]$s) {
+    if (-not $s) { return $null }
+    try { return [datetime]::Parse($s, $OK_Inv, [Globalization.DateTimeStyles]::RoundtripKind).ToLocalTime() } catch { return $null }
+}
+
+# Bitmemiş oturumlar (süren + ileride başlayacak)
+function Get-AliveSessions($state) {
+    $now = Get-Date
+    return , @(@($state.sessions) | Where-Object { $null -ne $_ -and (ConvertFrom-IsoTime $_.end) -gt $now })
+}
+
+# Şu an süren oturumlar
+function Get-ActiveSessions($state) {
+    $now = Get-Date
+    return , @(@($state.sessions) | Where-Object {
+        $null -ne $_ -and (ConvertFrom-IsoTime $_.start) -le $now -and (ConvertFrom-IsoTime $_.end) -gt $now
+    })
 }
 
 # ---------- Zaman kuralları ----------
@@ -270,20 +285,8 @@ function Get-RuleTargets($r) {
     return , $list.ToArray()
 }
 
-function Get-DersTargets($cfg) {
-    $set = New-Object System.Collections.Generic.HashSet[string]
-    foreach ($r in @($cfg.rules)) {
-        if ($null -eq $r -or $r.kind -ne 'ders') { continue }
-        foreach ($t in (Get-RuleTargets $r)) { [void]$set.Add($t) }
-    }
-    return , [string[]]@($set)
-}
-
 # Yeni ayar eskisinden daha sıkı (ya da aynı) mı? Öyleyse hemen uygulanabilir.
 function Test-StricterOrEqual($new, $old) {
-    $nd = Get-DersTargets $new
-    foreach ($t in (Get-DersTargets $old)) { if ($nd -notcontains $t) { return $false } }
-
     $oldRules = @(@($old.rules) | Where-Object { $null -ne $_ })
     $newRules = @(@($new.rules) | Where-Object { $null -ne $_ })
     $oldMasks = @($oldRules | ForEach-Object { , (Get-RuleMask $_) })
@@ -309,7 +312,7 @@ function Test-StricterOrEqual($new, $old) {
 }
 
 # Şu an neler engelli? -> procs, sites, rules (aktif kural adları)
-function Get-BlockState($cfg, [int]$wm, [bool]$session) {
+function Get-BlockState($cfg, [int]$wm, $sessions) {
     $procs = New-Object System.Collections.Generic.HashSet[string]
     $sites = New-Object System.Collections.Generic.HashSet[string]
     $names = New-Object System.Collections.Generic.List[string]
@@ -317,10 +320,15 @@ function Get-BlockState($cfg, [int]$wm, [bool]$session) {
         if ($null -eq $r) { continue }
         $on = Test-RuleCovers $r $wm
         if ($on) { $names.Add([string]$r.name) }
-        if ($on -or ($session -and $r.kind -eq 'ders')) {
+        if ($on) {
             foreach ($a in (L $r.apps))  { [void]$procs.Add($a) }
             foreach ($s in (L $r.sites)) { [void]$sites.Add($s) }
         }
+    }
+    foreach ($x in @($sessions)) {
+        if ($null -eq $x) { continue }
+        foreach ($a in (L $x.apps))  { [void]$procs.Add($a) }
+        foreach ($s in (L $x.sites)) { [void]$sites.Add($s) }
     }
     [pscustomobject]@{ procs = [string[]]@($procs); sites = [string[]]@($sites); rules = [string[]]@($names) }
 }

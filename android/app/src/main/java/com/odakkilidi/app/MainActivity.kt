@@ -15,8 +15,6 @@ import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
-import java.time.Instant
-import java.time.ZoneId
 
 class MainActivity : Activity() {
 
@@ -24,15 +22,7 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        title = "Odak Kilidi"
-        val scroll = ScrollView(this)
-        scroll.setBackgroundColor(Ui.BG)
-        root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(Ui.dp(this@MainActivity, 16), Ui.dp(this@MainActivity, 12), Ui.dp(this@MainActivity, 16), Ui.dp(this@MainActivity, 48))
-        }
-        scroll.addView(root)
-        setContentView(scroll)
+        root = Ui.page(this)
     }
 
     override fun onResume() {
@@ -48,46 +38,56 @@ class MainActivity : Activity() {
         val shown = Store.editable(this)
         val wm = Rules.weekMinuteNow()
 
+        val days = listOf("Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar")
+        root.addView(Ui.hero(this, "Odak Kilidi", "${days[wm / 1440]} · ${Rules.fmt(wm % 1440)} — odaklan, gerisi bekleyebilir"))
+
         // ---------- Şu anki durum ----------
         val running = Rules.activeRules(active, wm)
-        val session = Store.sessionActive(this)
-        if (running.isEmpty() && !session) {
+        val sessions = Store.sessions(this)
+        val now = System.currentTimeMillis()
+        val liveSessions = sessions.filter { it.start <= now }
+        if (running.isEmpty() && liveSessions.isEmpty()) {
             val next = Rules.nextStart(active, wm)
-            val txt = if (active.rules.isEmpty()) "Henüz kural yok — aşağıdan ekle"
+            val txt = if (active.rules.isEmpty() && sessions.isEmpty()) "🔓 Şu an serbest"
             else "🔓 Şu an serbest" + (next?.let { "\nSıradaki: ${it.first.name} · ${Rules.fmtWeekMinute((wm + it.second) % WEEK, wm)}" } ?: "")
-            root.addView(Ui.banner(this, txt, if (active.rules.isEmpty()) Ui.AMBER else Ui.GREEN))
+            root.addView(Ui.banner(this, txt, Ui.GREEN))
         } else {
-            val lines = running.map { (r, left) -> "• ${r.name} — ${Rules.fmtWeekMinute((wm + left) % WEEK, wm)}'e kadar" }
+            val lines = running.map { (r, left) -> "• ${r.name} — ${Rules.fmtWeekMinute((wm + left) % WEEK, wm)}'e kadar" } +
+                liveSessions.map { "• 📚 Ders — ${Rules.fmtMillis(it.end)}'e kadar" }
             root.addView(Ui.banner(this, "🔒 Şu an kilitli\n" + lines.joinToString("\n"), Ui.RED))
         }
 
         // ---------- Ders modu ----------
         root.addView(Ui.header(this, "📚 Ders modu"))
-        if (session) {
-            val end = Store.sessionEnd(this)
-            val leftMin = ((end - System.currentTimeMillis() + 59_999) / 60_000).toInt()
-            val t = Instant.ofEpochMilli(end).atZone(ZoneId.systemDefault()).toLocalTime()
-            root.addView(Ui.card(this, "Ders modu açık — ${Rules.fmt(t.hour * 60 + t.minute)}'e kadar (${Rules.fmtDuration(leftMin)})\nKilitli: ${targetsSummary(Rules.dersTargets(active))}", Ui.NAVY))
-            root.addView(Ui.button(this, "Süreyi uzat") { askSession(true) })
-        } else {
-            val dt = Rules.dersTargets(active)
-            root.addView(Ui.note(this, if (dt.isEmpty())
-                "Ders türünde bir kural ekle; \"Ders başlat\"a basınca o kuralların hedefleri seçtiğin süre boyunca kilitlenir."
-            else "Başlatınca kilitlenecekler: ${targetsSummary(dt)}"))
-            root.addView(Ui.button(this, "▶  Ders çalışmaya başla", primary = true) { askSession(false) })
+        if (sessions.isEmpty()) {
+            root.addView(Ui.note(this, "Ders çalışacağın zaman bas: süreyi, başlangıç saatini ve neyin kilitleneceğini seçersin. Başladıktan sonra erken bitirilemez."))
         }
+        for (ss in sessions) {
+            val live = ss.start <= now
+            val leftMin = ((ss.end - now + 59_999) / 60_000).toInt()
+            val head = if (live) "🔒 Ders sürüyor — ${Rules.fmtMillis(ss.end)}'e kadar (${Rules.fmtDuration(leftMin)} kaldı)"
+                else "⏰ Planlandı — ${Rules.fmtMillis(ss.start)} → ${Rules.fmtMillis(ss.end)}"
+            root.addView(Ui.card(this, "$head\nKilitli: ${targetsSummary(ss.targets())}", if (live) Ui.ACCENT else Ui.AMBER))
+        }
+        root.addView(Ui.button(this, "▶  Ders çalışmaya başla", primary = true) {
+            startActivity(Intent(this, StudyActivity::class.java))
+        })
 
         // ---------- Kurallar ----------
         root.addView(Ui.header(this, "🗂️ Kurallar"))
         if (shown.rules.isEmpty()) root.addView(Ui.note(this, "Henüz kural yok."))
         shown.rules.forEachIndexed { idx, r ->
             val isOn = running.any { it.first.id == r.id }
-            val kindTxt = if (r.kind == KIND_DERS) "📚 Ders" else "📅 Rutin"
-            val when_ = if (r.ranges.isEmpty()) "Sadece \"Ders başlat\" ile"
+            val when_ = if (r.ranges.isEmpty()) "Saat yok — düzenleyip saat ekle"
                 else Rules.fmtDays(r.days) + " · " + r.ranges.joinToString(", ") { Rules.fmtRange(it) }
-            val body = "$kindTxt · ${r.name}" + (if (isOn) "  🔒" else "") +
-                "\n$when_\n${targetsSummary(r.targets())}"
-            root.addView(Ui.ruleCard(this, body) {
+            root.addView(Ui.ruleCard(this,
+                badge = if (r.kind == KIND_DERS) "📚 DERS" else "📅 RUTİN",
+                badgeColor = if (r.kind == KIND_DERS) Ui.ACCENT else Ui.ACCENT2,
+                title = r.name,
+                line1 = when_,
+                line2 = targetsSummary(r.targets()),
+                locked = isOn
+            ) {
                 startActivity(Intent(this, RuleEditActivity::class.java).putExtra("index", idx))
             })
         }
@@ -98,7 +98,7 @@ class MainActivity : Activity() {
 
         // ---------- Bekleyen değişiklik ----------
         Store.pending(this)?.let { (_, date) ->
-            root.addView(Ui.card(this, "⏳ Bekleyen değişiklikler $date tarihinde geçerli olacak. Yukarıdaki liste o hâli gösteriyor.", Ui.AMBER))
+            root.addView(Ui.card(this, "⏳ Bekleyen değişiklikler\n$date tarihinde geçerli olacak. Yukarıdaki liste o hâli gösteriyor.", Ui.AMBER))
             root.addView(Ui.button(this, "Bekleyen değişiklikleri iptal et") {
                 Store.cancelPending(this)
                 render()
@@ -172,31 +172,6 @@ class MainActivity : Activity() {
         pkg
     }
 
-    private fun askSession(extend: Boolean) {
-        if (Rules.dersTargets(Store.active(this)).isEmpty()) {
-            AlertDialog.Builder(this).setTitle("Önce ders kuralı ekle")
-                .setMessage("\"Yeni kural ekle\" → türü 📚 Ders seç → kilitlenecek uygulama ve siteleri işaretle. Saat girmek zorunda değilsin.")
-                .setPositiveButton("Tamam", null).show()
-            return
-        }
-        val labels = arrayOf("25 dk", "45 dk", "1 saat", "1,5 saat", "2 saat", "3 saat", "4 saat")
-        val mins = intArrayOf(25, 45, 60, 90, 120, 180, 240)
-        AlertDialog.Builder(this)
-            .setTitle(if (extend) "Ne kadar uzatılsın?" else "Ne kadar ders çalışacaksın?")
-            .setItems(labels) { _, which ->
-                AlertDialog.Builder(this)
-                    .setTitle("${labels[which]} başlatılsın mı?")
-                    .setMessage("Ders modu başladıktan sonra erken bitirilemez.")
-                    .setPositiveButton("Başlat") { _, _ ->
-                        Store.startSession(this, mins[which])
-                        render()
-                    }
-                    .setNegativeButton("Vazgeç", null)
-                    .show()
-            }
-            .show()
-    }
-
     private fun askAdmin() {
         val i = Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN)
             .putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, Store.adminComponent(this))
@@ -208,87 +183,5 @@ class MainActivity : Activity() {
     private fun isAccessibilityOn(): Boolean {
         val s = Settings.Secure.getString(contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES) ?: return false
         return s.split(':').any { it.startsWith("$packageName/") }
-    }
-}
-
-/** Ortak görünüm parçaları */
-object Ui {
-    val BG = Color.parseColor("#F4F6FA")
-    val NAVY = Color.parseColor("#1F2A44")
-    val AMBER = Color.parseColor("#B7791F")
-    val RED = Color.parseColor("#C53030")
-    val GREEN = Color.parseColor("#2F855A")
-    val ACCENT = Color.parseColor("#3B5BDB")
-
-    fun dp(ctx: Context, v: Int) = (v * ctx.resources.displayMetrics.density).toInt()
-
-    fun lp(ctx: Context, top: Int = 0) = LinearLayout.LayoutParams(
-        LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-    ).apply { topMargin = dp(ctx, top) }
-
-    fun header(ctx: Context, t: String) = TextView(ctx).apply {
-        text = t
-        textSize = 18f
-        setTypeface(typeface, Typeface.BOLD)
-        setTextColor(NAVY)
-        setPadding(0, dp(ctx, 22), 0, dp(ctx, 6))
-    }
-
-    fun note(ctx: Context, t: String) = TextView(ctx).apply {
-        text = t
-        textSize = 13f
-        setTextColor(Color.DKGRAY)
-        setPadding(0, dp(ctx, 2), 0, dp(ctx, 6))
-    }
-
-    private fun rounded(color: Int, ctx: Context, stroke: Int? = null) = GradientDrawable().apply {
-        setColor(color)
-        cornerRadius = dp(ctx, 12).toFloat()
-        if (stroke != null) setStroke(dp(ctx, 1), stroke)
-    }
-
-    fun banner(ctx: Context, t: String, color: Int) = TextView(ctx).apply {
-        text = t
-        textSize = 17f
-        setTextColor(Color.WHITE)
-        setTypeface(typeface, Typeface.BOLD)
-        setPadding(dp(ctx, 16), dp(ctx, 14), dp(ctx, 16), dp(ctx, 14))
-        background = rounded(color, ctx)
-        layoutParams = lp(ctx, 4)
-    }
-
-    fun card(ctx: Context, t: String, color: Int) = TextView(ctx).apply {
-        text = t
-        textSize = 15f
-        setTextColor(Color.WHITE)
-        setPadding(dp(ctx, 14), dp(ctx, 12), dp(ctx, 14), dp(ctx, 12))
-        background = rounded(color, ctx)
-        layoutParams = lp(ctx, 8)
-    }
-
-    fun ruleCard(ctx: Context, t: String, onClick: () -> Unit) = TextView(ctx).apply {
-        text = t
-        textSize = 15f
-        setTextColor(NAVY)
-        setLineSpacing(0f, 1.15f)
-        setPadding(dp(ctx, 14), dp(ctx, 12), dp(ctx, 14), dp(ctx, 12))
-        background = rounded(Color.WHITE, ctx, Color.parseColor("#D5DBE8"))
-        layoutParams = lp(ctx, 8)
-        isClickable = true
-        setOnClickListener { onClick() }
-    }
-
-    fun button(ctx: Context, t: String, primary: Boolean = false, onClick: () -> Unit) = Button(ctx).apply {
-        text = t
-        setAllCaps(false)
-        textSize = 15f
-        if (primary) {
-            setTextColor(Color.WHITE)
-            background = rounded(ACCENT, ctx)
-            gravity = Gravity.CENTER
-            setPadding(dp(ctx, 12), dp(ctx, 12), dp(ctx, 12), dp(ctx, 12))
-        }
-        layoutParams = lp(ctx, 8)
-        setOnClickListener { onClick() }
     }
 }

@@ -3,18 +3,70 @@ Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
 . (Join-Path $PSScriptRoot 'common.ps1')
 
-$Red    = [System.Drawing.Color]::FromArgb(197, 48, 48)
-$Green  = [System.Drawing.Color]::FromArgb(47, 133, 90)
-$Amber  = [System.Drawing.Color]::FromArgb(183, 121, 31)
-$Navy   = [System.Drawing.Color]::FromArgb(31, 42, 68)
-$Accent = [System.Drawing.Color]::FromArgb(59, 91, 219)
-$Gray   = [System.Drawing.Color]::DimGray
+# ---------- Koyu tema renkleri ----------
+$Bg       = [System.Drawing.Color]::FromArgb(14, 19, 34)
+$Surface  = [System.Drawing.Color]::FromArgb(24, 32, 54)
+$Surface2 = [System.Drawing.Color]::FromArgb(33, 43, 70)
+$Border   = [System.Drawing.Color]::FromArgb(45, 56, 88)
+$Text     = [System.Drawing.Color]::FromArgb(238, 241, 248)
+$Navy     = $Text   # başlık yazıları
+$Gray     = [System.Drawing.Color]::FromArgb(151, 161, 188)
+$Accent   = [System.Drawing.Color]::FromArgb(124, 92, 255)
+$Red      = [System.Drawing.Color]::FromArgb(229, 72, 77)
+$Green    = [System.Drawing.Color]::FromArgb(31, 169, 113)
+$Amber    = [System.Drawing.Color]::FromArgb(224, 154, 26)
+
+# Koyu başlık çubuğu (Windows 10/11)
+try {
+    Add-Type -Namespace OK -Name Dwm -MemberDefinition '[System.Runtime.InteropServices.DllImport("dwmapi.dll")] public static extern int DwmSetWindowAttribute(System.IntPtr h, int a, ref int v, int s);' -ErrorAction Stop
+    $script:DarkTitle = $true
+} catch { $script:DarkTitle = $false }
+
+# Bir pencereyi ve içindeki her şeyi koyu temaya boyar
+function Set-Theme($ctl) {
+    if ($ctl -is [System.Windows.Forms.Form]) {
+        $ctl.BackColor = $Bg; $ctl.ForeColor = $Text
+        if ($script:DarkTitle) {
+            $ctl.Add_HandleCreated({ try { $v = 1; [void][OK.Dwm]::DwmSetWindowAttribute($this.Handle, 20, [ref]$v, 4) } catch {} })
+        }
+    }
+    foreach ($c in $ctl.Controls) {
+        switch ($c.GetType().Name) {
+            'Button' {
+                $c.FlatStyle = 'Flat'
+                $c.FlatAppearance.BorderSize = 1
+                $c.Cursor = [System.Windows.Forms.Cursors]::Hand
+                if ($c.AccessibleName -eq 'primary') {
+                    $c.BackColor = $Accent; $c.ForeColor = [System.Drawing.Color]::White; $c.FlatAppearance.BorderColor = $Accent
+                    $c.Font = $FontB
+                } else {
+                    $c.BackColor = $Surface2; $c.ForeColor = $Text; $c.FlatAppearance.BorderColor = $Border
+                }
+            }
+            { $_ -in @('TextBox', 'ListBox', 'CheckedListBox', 'NumericUpDown', 'ComboBox', 'ListView') } {
+                $c.BackColor = $Surface; $c.ForeColor = $Text
+                if ($c.GetType().Name -ne 'ComboBox') { $c.BorderStyle = 'FixedSingle' }
+            }
+            { $_ -in @('CheckBox', 'RadioButton') } { $c.ForeColor = $Text; $c.BackColor = [System.Drawing.Color]::Transparent }
+            'GroupBox' { $c.ForeColor = $Text; $c.BackColor = $Bg }
+        }
+        if ($c.Controls.Count -gt 0) { Set-Theme $c }
+    }
+}
 $FontN = New-Object System.Drawing.Font('Segoe UI', 10)
 $FontB = New-Object System.Drawing.Font('Segoe UI', 10, [System.Drawing.FontStyle]::Bold)
 $FontH = New-Object System.Drawing.Font('Segoe UI', 11, [System.Drawing.FontStyle]::Bold)
 
-$DurLabels = @('25 dk', '45 dk', '1 saat', '1,5 saat', '2 saat', '3 saat', '4 saat')
-$DurMins   = @(25, 45, 60, 90, 120, 180, 240)
+$QuickLabels = @('25 dk', '45 dk', '1 sa', '2 sa', '3 sa', '4 sa')
+$QuickMins   = @(25, 45, 60, 120, 180, 240)
+
+# Tarih -> "15:00", "Yarın 15:00" ya da "Sal 15:00"
+function Format-Time([datetime]$t) {
+    $hm = $t.ToString('HH:mm')
+    if ($t.Date -eq (Get-Date).Date) { return $hm }
+    if ($t.Date -eq (Get-Date).Date.AddDays(1)) { return "Yarın $hm" }
+    return ("{0} {1}" -f $OK_DayNames[([int]$t.DayOfWeek + 6) % 7], $hm)
+}
 
 $script:St = $null          # son okunan durum
 $script:Rules = @()         # listede gösterilen (düzenlenebilir) kurallar
@@ -100,7 +152,7 @@ function Show-RuleEditor($rule) {
     $dlg.FormBorderStyle = 'FixedDialog'
     $dlg.MaximizeBox = $false; $dlg.MinimizeBox = $false
     $dlg.Font = $FontN
-    $dlg.BackColor = [System.Drawing.Color]::White
+    $dlg.BackColor = $Bg
 
     function D-Label($text, $x, $y, $w, $font = $FontB, $color = $Navy) {
         $l = New-Object System.Windows.Forms.Label
@@ -119,7 +171,7 @@ function Show-RuleEditor($rule) {
     $rbRutin = New-Object System.Windows.Forms.RadioButton
     $rbRutin.Text = 'Rutin (her hafta otomatik)'; $rbRutin.Location = New-Object System.Drawing.Point(15, 70); $rbRutin.Size = New-Object System.Drawing.Size(230, 24)
     $rbDers = New-Object System.Windows.Forms.RadioButton
-    $rbDers.Text = 'Ders (Ders başlat butonu + istersen saat)'; $rbDers.Location = New-Object System.Drawing.Point(250, 70); $rbDers.Size = New-Object System.Drawing.Size(300, 24)
+    $rbDers.Text = 'Ders (haftalık sabit ders saatleri)'; $rbDers.Location = New-Object System.Drawing.Point(250, 70); $rbDers.Size = New-Object System.Drawing.Size(300, 24)
     $dlg.Controls.AddRange(@($rbRutin, $rbDers))
 
     # Günler
@@ -212,6 +264,7 @@ function Show-RuleEditor($rule) {
         $ok = New-Object System.Windows.Forms.Button
         $ok.Text = 'Ekle'; $ok.Location = New-Object System.Drawing.Point(310, 372); $ok.Size = New-Object System.Drawing.Size(100, 34); $ok.DialogResult = 'OK'
         $pd.Controls.AddRange(@($list, $ok)); $pd.AcceptButton = $ok
+        $ok.AccessibleName = 'primary'; Set-Theme $pd
         if ($pd.ShowDialog($script:Ed.dlg) -eq 'OK') {
             $cur = @(($script:Ed.txtProcs.Text -split "\r?\n") | ForEach-Object { Get-ProcName $_ } | Where-Object { $_ })
             foreach ($item in $list.CheckedItems) {
@@ -229,7 +282,7 @@ function Show-RuleEditor($rule) {
     $txtSites.Location = New-Object System.Drawing.Point(15, 598); $txtSites.Size = New-Object System.Drawing.Size(530, 52)
     $dlg.Controls.Add($txtSites)
 
-    $btnOk = New-Object System.Windows.Forms.Button; $btnOk.Text = 'Kaydet'; $btnOk.Font = $FontB
+    $btnOk = New-Object System.Windows.Forms.Button; $btnOk.Text = 'Kaydet'; $btnOk.Font = $FontB; $btnOk.AccessibleName = 'primary'
     $btnOk.Location = New-Object System.Drawing.Point(335, 662); $btnOk.Size = New-Object System.Drawing.Size(100, 34)
     $btnCancel = New-Object System.Windows.Forms.Button; $btnCancel.Text = 'Vazgeç'
     $btnCancel.Location = New-Object System.Drawing.Point(445, 662); $btnCancel.Size = New-Object System.Drawing.Size(100, 34); $btnCancel.DialogResult = 'Cancel'
@@ -270,7 +323,7 @@ function Show-RuleEditor($rule) {
         $name = $E.txtName.Text.Trim()
         if (-not $name) { $name = if ($kind -eq 'ders') { 'Ders' } else { 'Rutin' } }
         $days = [bool[]]@($E.dayChecks | ForEach-Object { $_.Checked })
-        if ($kind -eq 'rutin' -and $E.ranges.Count -eq 0) { Show-Msg 'Rutin kural için en az bir saat aralığı ekle.' 'Warning'; return }
+        if ($E.ranges.Count -eq 0) { Show-Msg 'En az bir saat aralığı ekle. (Anlık ders için ana penceredeki "Ders başlat" butonunu kullan.)' 'Warning'; return }
         if ($E.ranges.Count -gt 0 -and -not ($days -contains $true)) { Show-Msg 'En az bir gün seç.' 'Warning'; return }
         $apps = New-Object System.Collections.Generic.List[string]
         $sites = New-Object System.Collections.Generic.List[string]
@@ -294,8 +347,181 @@ function Show-RuleEditor($rule) {
         $E.dlg.Close()
     })
 
+    Set-Theme $dlg
     [void]$dlg.ShowDialog($form)
     return $script:Ed.result
+}
+
+# =====================================================================
+#  Ders çalışma penceresi: süre + başlangıç + neler kilitlensin
+# =====================================================================
+function Show-StudyDialog {
+    $script:Sd = @{ result = $null }
+
+    $dlg = New-Object System.Windows.Forms.Form
+    $dlg.Text = 'Ders çalışmaya başla'
+    $dlg.ClientSize = New-Object System.Drawing.Size(560, 640)
+    $dlg.StartPosition = 'CenterParent'
+    $dlg.FormBorderStyle = 'FixedDialog'
+    $dlg.MaximizeBox = $false; $dlg.MinimizeBox = $false
+    $dlg.Font = $FontN
+    $dlg.BackColor = $Bg
+    $script:Sd.dlg = $dlg
+
+    function S-Label($text, $x, $y, $w, $font = $FontB, $color = $Navy) {
+        $l = New-Object System.Windows.Forms.Label
+        $l.Text = $text; $l.Location = New-Object System.Drawing.Point($x, $y)
+        $l.Size = New-Object System.Drawing.Size($w, 22); $l.Font = $font; $l.ForeColor = $color
+        $dlg.Controls.Add($l)
+    }
+
+    # Süre
+    S-Label 'Ne kadar çalışacaksın?' 15 12 400
+    $numH = New-Object System.Windows.Forms.NumericUpDown
+    $numH.Minimum = 0; $numH.Maximum = 12; $numH.Value = 2
+    $numH.Font = New-Object System.Drawing.Font('Segoe UI', 14)
+    $numH.Location = New-Object System.Drawing.Point(15, 38); $numH.Size = New-Object System.Drawing.Size(70, 34)
+    S-Label 'saat' 90 46 50 $FontN $Gray
+    $numM = New-Object System.Windows.Forms.NumericUpDown
+    $numM.Minimum = 0; $numM.Maximum = 55; $numM.Increment = 5; $numM.Value = 0
+    $numM.Font = New-Object System.Drawing.Font('Segoe UI', 14)
+    $numM.Location = New-Object System.Drawing.Point(145, 38); $numM.Size = New-Object System.Drawing.Size(70, 34)
+    S-Label 'dakika' 220 46 60 $FontN $Gray
+    $dlg.Controls.AddRange(@($numH, $numM))
+    $script:Sd.numH = $numH; $script:Sd.numM = $numM
+    for ($i = 0; $i -lt $QuickLabels.Count; $i++) {
+        $b = New-Object System.Windows.Forms.Button
+        $b.Text = $QuickLabels[$i]; $b.Tag = $QuickMins[$i]
+        $b.Location = New-Object System.Drawing.Point((15 + $i * 88), 80); $b.Size = New-Object System.Drawing.Size(82, 28)
+        $b.Add_Click({
+            $m = [int]$this.Tag
+            $script:Sd.numH.Value = [math]::Floor($m / 60)
+            $script:Sd.numM.Value = $m % 60
+        })
+        $dlg.Controls.Add($b)
+    }
+
+    # Başlangıç
+    S-Label 'Ne zaman başlasın?' 15 122 400
+    $rbNow = New-Object System.Windows.Forms.RadioButton
+    $rbNow.Text = 'Şimdi'; $rbNow.Checked = $true
+    $rbNow.Location = New-Object System.Drawing.Point(15, 148); $rbNow.Size = New-Object System.Drawing.Size(90, 26)
+    $rbAt = New-Object System.Windows.Forms.RadioButton
+    $rbAt.Text = 'Şu saatte:'
+    $rbAt.Location = New-Object System.Drawing.Point(115, 148); $rbAt.Size = New-Object System.Drawing.Size(100, 26)
+    $dtAt = New-Object System.Windows.Forms.DateTimePicker
+    $dtAt.Format = 'Custom'; $dtAt.CustomFormat = 'HH:mm'; $dtAt.ShowUpDown = $true
+    $dtAt.Font = New-Object System.Drawing.Font('Segoe UI', 12)
+    $dtAt.Location = New-Object System.Drawing.Point(218, 146); $dtAt.Size = New-Object System.Drawing.Size(90, 30)
+    $n = Get-Date
+    $dtAt.Value = $n.Date.AddHours($n.Hour + 1)
+    $dlg.Controls.AddRange(@($rbNow, $rbAt, $dtAt))
+    $script:Sd.rbNow = $rbNow; $script:Sd.rbAt = $rbAt; $script:Sd.dtAt = $dtAt
+    $dtAt.Add_ValueChanged({ $script:Sd.rbAt.Checked = $true })
+
+    # Neler kilitlensin? (son seçim hazır gelir)
+    $last = $script:St.lastSession
+    if ($null -ne $last) { $iApps = L $last.apps; $iSites = L $last.sites }
+    else { $iApps = [string[]]@('instagram'); $iSites = [string[]]@('instagram.com', 'youtube.com', 'youtu.be') }
+    S-Label 'Neler kilitlensin?' 15 190 400
+    S-Label $(if ($null -ne $last) { 'Son ders oturumundaki seçimin hazır geldi.' } else { 'İstediklerini işaretle.' }) 15 212 530 $FontN $Gray
+    $clb = New-Object System.Windows.Forms.CheckedListBox
+    $clb.Location = New-Object System.Drawing.Point(15, 236); $clb.Size = New-Object System.Drawing.Size(530, 104)
+    $clb.MultiColumn = $true; $clb.ColumnWidth = 170; $clb.CheckOnClick = $true
+    $pProcs = @(); $pSites = @()
+    for ($k = 0; $k -lt $OK_Presets.Count; $k++) {
+        $p = $OK_Presets[$k]
+        [void]$clb.Items.Add($p.name)
+        $hit = $false
+        foreach ($x in $p.sites) { if ($iSites -contains $x) { $hit = $true } }
+        foreach ($x in $p.procs) { if ($iApps -contains $x) { $hit = $true } }
+        if ($hit) { $clb.SetItemChecked($k, $true); $pProcs += @($p.procs); $pSites += @($p.sites) }
+    }
+    $dlg.Controls.Add($clb)
+
+    S-Label 'Diğer programlar (her satıra bir ad)' 15 350 400
+    $txtProcs = New-Object System.Windows.Forms.TextBox
+    $txtProcs.Multiline = $true; $txtProcs.ScrollBars = 'Vertical'; $txtProcs.AcceptsReturn = $true
+    $txtProcs.Location = New-Object System.Drawing.Point(15, 374); $txtProcs.Size = New-Object System.Drawing.Size(530, 52)
+    $txtProcs.Text = (@($iApps | Where-Object { $pProcs -notcontains $_ }) -join "`r`n")
+    S-Label 'Diğer siteler (her satıra bir site)' 15 436 400
+    $txtSites = New-Object System.Windows.Forms.TextBox
+    $txtSites.Multiline = $true; $txtSites.ScrollBars = 'Vertical'; $txtSites.AcceptsReturn = $true
+    $txtSites.Location = New-Object System.Drawing.Point(15, 460); $txtSites.Size = New-Object System.Drawing.Size(530, 52)
+    $txtSites.Text = (@($iSites | Where-Object { $pSites -notcontains $_ }) -join "`r`n")
+    $dlg.Controls.AddRange(@($txtProcs, $txtSites))
+
+    # Özet
+    $lblSum = New-Object System.Windows.Forms.Label
+    $lblSum.Location = New-Object System.Drawing.Point(15, 524); $lblSum.Size = New-Object System.Drawing.Size(530, 40)
+    $lblSum.Font = $FontH; $lblSum.ForeColor = [System.Drawing.Color]::White; $lblSum.BackColor = $Accent; $lblSum.TextAlign = 'MiddleCenter'
+    $dlg.Controls.Add($lblSum)
+    $script:Sd.lblSum = $lblSum; $script:Sd.clb = $clb; $script:Sd.txtProcs = $txtProcs; $script:Sd.txtSites = $txtSites
+
+    $script:Sd.calc = {
+        $mins = [int]$script:Sd.numH.Value * 60 + [int]$script:Sd.numM.Value
+        $now = Get-Date
+        if ($script:Sd.rbNow.Checked) { $start = $now }
+        else {
+            $v = $script:Sd.dtAt.Value
+            $start = $now.Date.AddHours($v.Hour).AddMinutes($v.Minute)
+            if ($start -le $now) { $start = $start.AddDays(1) }
+        }
+        @{ mins = $mins; start = $start; end = $start.AddMinutes($mins) }
+    }
+    $script:Sd.update = {
+        $c = & $script:Sd.calc
+        if ($c.mins -le 0) { $script:Sd.lblSum.Text = 'Süre seç'; return }
+        $from = if ($script:Sd.rbNow.Checked) { 'Şimdi' } else { Format-Time $c.start }
+        $script:Sd.lblSum.Text = "$from  →  $(Format-Time $c.end)   ($(Format-Duration $c.mins))"
+    }
+    $numH.Add_ValueChanged({ & $script:Sd.update })
+    $numM.Add_ValueChanged({ & $script:Sd.update })
+    $rbNow.Add_CheckedChanged({ & $script:Sd.update })
+    $dtAt.Add_ValueChanged({ & $script:Sd.update })
+
+    $btnGo = New-Object System.Windows.Forms.Button
+    $btnGo.Text = 'Başlat'; $btnGo.AccessibleName = 'primary'
+    $btnGo.Location = New-Object System.Drawing.Point(335, 584); $btnGo.Size = New-Object System.Drawing.Size(100, 36)
+    $btnNo = New-Object System.Windows.Forms.Button
+    $btnNo.Text = 'Vazgeç'; $btnNo.DialogResult = 'Cancel'
+    $btnNo.Location = New-Object System.Drawing.Point(445, 584); $btnNo.Size = New-Object System.Drawing.Size(100, 36)
+    $dlg.Controls.AddRange(@($btnGo, $btnNo)); $dlg.CancelButton = $btnNo
+    S-Label 'Başladıktan sonra erken bitirilemez.' 15 592 300 $FontN $Gray
+
+    $btnGo.Add_Click({
+        $D = $script:Sd
+        $c = & $D.calc
+        if ($c.mins -lt 5) { Show-Msg 'Süre en az 5 dakika olmalı.' 'Warning'; return }
+        $apps = New-Object System.Collections.Generic.List[string]
+        $sites = New-Object System.Collections.Generic.List[string]
+        foreach ($idx in $D.clb.CheckedIndices) {
+            $p = $OK_Presets[[int]$idx]
+            foreach ($a in $p.procs) { if (-not $apps.Contains($a)) { $apps.Add($a) } }
+            foreach ($x in $p.sites) { if (-not $sites.Contains($x)) { $sites.Add($x) } }
+        }
+        foreach ($line in ($D.txtProcs.Text -split "\r?\n")) { $a = Get-ProcName $line; if ($a -and -not $apps.Contains($a)) { $apps.Add($a) } }
+        foreach ($line in ($D.txtSites.Text -split "\r?\n")) {
+            $x = Get-NormalHost $line
+            if ($x -and $x -notmatch '\s' -and $x.Contains('.') -and -not $sites.Contains($x)) { $sites.Add($x) }
+        }
+        if ($apps.Count -eq 0 -and $sites.Count -eq 0) { Show-Msg 'Kilitlenecek en az bir şey seç.' 'Warning'; return }
+        $from = if ($D.rbNow.Checked) { 'şimdi' } else { Format-Time $c.start }
+        if (-not (Ask-YesNo "$(Format-Duration $c.mins) boyunca ($from → $(Format-Time $c.end)) seçtiklerin kilitli olacak.`r`n`r`nErken bitirilemez, iptal edilemez. Başlatılsın mı?")) { return }
+        $D.result = @{
+            type = 'startSession'
+            start = $(if ($D.rbNow.Checked) { $null } else { $c.start.ToString('o', $OK_Inv) })
+            minutes = $c.mins
+            apps = $apps.ToArray(); sites = $sites.ToArray()
+        }
+        $D.dlg.DialogResult = 'OK'
+        $D.dlg.Close()
+    })
+
+    & $script:Sd.update
+    Set-Theme $dlg
+    [void]$dlg.ShowDialog($form)
+    return $script:Sd.result
 }
 
 # =====================================================================
@@ -308,7 +534,7 @@ $form.StartPosition = 'CenterScreen'
 $form.FormBorderStyle = 'FixedSingle'
 $form.MaximizeBox = $false
 $form.Font = $FontN
-$form.BackColor = [System.Drawing.Color]::White
+$form.BackColor = $Bg
 
 function Add-Label($text, $x, $y, $w, $h, $font = $FontN, $color = $null) {
     $l = New-Object System.Windows.Forms.Label
@@ -339,22 +565,18 @@ $grp.Text = 'Ders modu'; $grp.Font = $FontB; $grp.ForeColor = $Navy
 $grp.Location = New-Object System.Drawing.Point(15, 84); $grp.Size = New-Object System.Drawing.Size(690, 84)
 $form.Controls.Add($grp)
 $lblSession = New-Object System.Windows.Forms.Label
-$lblSession.Font = $FontN; $lblSession.ForeColor = [System.Drawing.Color]::Black
-$lblSession.Location = New-Object System.Drawing.Point(12, 24); $lblSession.Size = New-Object System.Drawing.Size(440, 50)
-$cmbDur = New-Object System.Windows.Forms.ComboBox
-$cmbDur.DropDownStyle = 'DropDownList'; $cmbDur.Font = $FontN
-$cmbDur.Location = New-Object System.Drawing.Point(460, 32); $cmbDur.Size = New-Object System.Drawing.Size(95, 28)
-foreach ($d in $DurLabels) { [void]$cmbDur.Items.Add($d) }
-$cmbDur.SelectedIndex = 1
+$lblSession.Font = $FontN; $lblSession.ForeColor = $Text
+$lblSession.Location = New-Object System.Drawing.Point(12, 22); $lblSession.Size = New-Object System.Drawing.Size(520, 56)
 $btnStart = New-Object System.Windows.Forms.Button
-$btnStart.Font = $FontB; $btnStart.BackColor = $Accent; $btnStart.ForeColor = [System.Drawing.Color]::White; $btnStart.FlatStyle = 'Flat'
-$btnStart.Location = New-Object System.Drawing.Point(565, 29); $btnStart.Size = New-Object System.Drawing.Size(112, 34)
-$grp.Controls.AddRange(@($lblSession, $cmbDur, $btnStart))
+$btnStart.AccessibleName = 'primary'
+$btnStart.Text = 'Ders başlat...'
+$btnStart.Location = New-Object System.Drawing.Point(540, 28); $btnStart.Size = New-Object System.Drawing.Size(138, 40)
+$grp.Controls.AddRange(@($lblSession, $btnStart))
 
 # Kurallar
 [void](Add-Label 'Kurallar' 15 178 300 22 $FontH $Navy)
 $lv = New-Object System.Windows.Forms.ListView
-$lv.View = 'Details'; $lv.FullRowSelect = $true; $lv.MultiSelect = $false; $lv.HideSelection = $false; $lv.GridLines = $true
+$lv.View = 'Details'; $lv.FullRowSelect = $true; $lv.MultiSelect = $false; $lv.HideSelection = $false; $lv.GridLines = $false
 $lv.Location = New-Object System.Drawing.Point(15, 202); $lv.Size = New-Object System.Drawing.Size(690, 230)
 [void]$lv.Columns.Add('Ad', 130)
 [void]$lv.Columns.Add('Tür', 60)
@@ -364,7 +586,7 @@ $lv.Location = New-Object System.Drawing.Point(15, 202); $lv.Size = New-Object S
 $form.Controls.Add($lv)
 
 $btnNew  = Add-Button '+ Yeni kural' 15 440 130 34
-$btnNew.Font = $FontB
+$btnNew.AccessibleName = 'primary'
 $btnEdit = Add-Button 'Düzenle' 155 440 110 34
 $btnDel  = Add-Button 'Sil' 275 440 90 34
 [void](Add-Label 'Kısıtlamayı ARTIRAN değişiklik hemen, AZALTAN değişiklik (saat kısaltma, hedef çıkarma, kural silme) ertesi gün geçerli olur.' 375 438 330 40 $FontN $Gray)
@@ -384,7 +606,9 @@ function Update-Form {
     $script:St = $st
     $cfg = $st.active
     $wm = Get-WeekMinute
-    $session = Test-SessionActive $st
+    $live = Get-ActiveSessions $st
+    $alive = Get-AliveSessions $st
+    $session = $live.Count -gt 0
 
     # Üst durum
     $activeRules = @(@($cfg.rules) | Where-Object { $null -ne $_ -and (Test-RuleCovers $_ $wm) })
@@ -398,7 +622,7 @@ function Update-Form {
             $until = if ($f -lt 0) { 'sürekli' } else { "$(Format-WeekMinute (($wm + $f) % $OK_Week) $wm)'e kadar" }
             $parts += "$($r.name) ($until)"
         }
-        if ($session) { $parts += "Ders modu ($((Get-SessionEnd $st).ToString('HH:mm'))'e kadar)" }
+        foreach ($x in $live) { $parts += "Ders ($(Format-Time (ConvertFrom-IsoTime $x.end))'e kadar)" }
         $lblStatus.Text = "KİLİTLİ: " + ($parts -join ' · ')
         $lblStatus.BackColor = $Red
     } elseif (@($cfg.rules).Count -eq 0) {
@@ -415,19 +639,16 @@ function Update-Form {
     }
 
     # Ders modu
-    $dt = Get-DersTargets $cfg
-    if ($session) {
-        $end = Get-SessionEnd $st
-        $left = [int][math]::Ceiling(($end - (Get-Date)).TotalMinutes)
-        $lblSession.Text = "Ders modu AÇIK — $($end.ToString('HH:mm'))'e kadar ($(Format-Duration $left)). Erken bitirilemez."
-        $btnStart.Text = 'Uzat'
-    } elseif ($dt.Count -eq 0) {
-        $lblSession.Text = 'Önce "Ders" türünde bir kural ekle. "Ders başlat"a basınca o kuralların hedefleri seçtiğin süre boyunca kilitlenir.'
-        $btnStart.Text = 'Ders başlat'
+    if ($alive.Count -eq 0) {
+        $lblSession.Text = 'Ders çalışacağın zaman bas: süreyi, başlangıç saatini ve neyin kilitleneceğini seçersin. Başladıktan sonra erken bitirilemez.'
     } else {
-        $names = @(@($cfg.rules) | Where-Object { $_.kind -eq 'ders' } | ForEach-Object { $_.name })
-        $lblSession.Text = "Başlatınca kilitlenecek kurallar: $($names -join ', ')"
-        $btnStart.Text = 'Ders başlat'
+        $lines = foreach ($x in $alive) {
+            $s0 = ConvertFrom-IsoTime $x.start; $e0 = ConvertFrom-IsoTime $x.end
+            $what = Get-TargetsText $x
+            if ($s0 -le (Get-Date)) { "SÜRÜYOR: $(Format-Time $e0)'e kadar — $what" }
+            else { "Planlandı: $(Format-Time $s0) → $(Format-Time $e0) — $what" }
+        }
+        $lblSession.Text = (@($lines) -join "`r`n")
     }
 
     # Kural listesi (bekleyen varsa onu göster)
@@ -443,7 +664,7 @@ function Update-Form {
         $rg = @(@($r.ranges) | Where-Object { $null -ne $_ })
         if ($rg.Count -eq 0) {
             [void]$it.SubItems.Add('-')
-            [void]$it.SubItems.Add('Sadece butonla')
+            [void]$it.SubItems.Add('Saat yok')
         } else {
             [void]$it.SubItems.Add((Format-Days $r.days))
             [void]$it.SubItems.Add((@($rg | ForEach-Object { Format-Range $_ }) -join ', '))
@@ -482,14 +703,14 @@ function Update-Form {
 
 # ---------------- Butonlar ----------------
 $btnStart.Add_Click({
-    if ((Get-DersTargets $script:St.active).Count -eq 0) {
-        Show-Msg 'Önce "+ Yeni kural" ile türü "Ders" olan bir kural ekle ve kilitlenecek siteleri/programları seç. Saat girmek zorunda değilsin.'
-        return
+    $req = Show-StudyDialog
+    if ($null -eq $req) { return }
+    $res = Send-Request $req
+    switch ($res) {
+        'OK'       { Show-Msg 'Ders oturumu başladı. Başarılar!' }
+        'GECERSIZ' { Show-Msg 'Ders oturumu başlatılamadı (süre ya da saat geçersiz).' 'Warning' }
+        default    { Show-Msg 'Arka plan servisi yanıt vermedi.' 'Error' }
     }
-    $i = [math]::Max(0, $cmbDur.SelectedIndex)
-    if (-not (Ask-YesNo "$($DurLabels[$i]) ders modu başlatılsın mı?`r`nBaşladıktan sonra erken bitirilemez.")) { return }
-    $res = Send-Request @{ type = 'startSession'; minutes = $DurMins[$i] }
-    if ($res -ne 'OK') { Show-Msg 'Arka plan servisi yanıt vermedi.' 'Error' }
     Update-Form
 })
 
@@ -544,6 +765,7 @@ $timer.Interval = 30000
 $timer.Add_Tick({ Update-Form })
 $timer.Start()
 
+Set-Theme $form
 Update-Form
 [void]$form.ShowDialog()
 $timer.Stop()
